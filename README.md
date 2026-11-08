@@ -16,6 +16,16 @@
   <img src="https://img.shields.io/badge/Architecture-x64%20%7C%20x86-lightgrey?style=for-the-badge" alt="Arch">
 </p>
 
+<p align="center">
+  <a href="https://github.com/gda96/AntigravityTray/releases/latest/download/AntigravityTray_Setup.exe">
+    <img src="https://img.shields.io/badge/Скачать-Установщик%20Setup.exe-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Скачать Установщик">
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/gda96/AntigravityTray/releases/latest/download/AntigravityTray.exe">
+    <img src="https://img.shields.io/badge/Скачать-Портативную%20версию%20.exe-0969da?style=for-the-badge&logo=windows&logoColor=white" alt="Скачать Portable">
+  </a>
+</p>
+
 ---
 
 ## 📖 О проекте
@@ -78,17 +88,26 @@ Antigravity Unlocker является критически важной фоно
 
 ---
 
-## 📥 Быстрая установка
+## 📥 Прямое скачивание и установка
 
-1. Перейдите в раздел **[Релизы (Releases)](https://github.com/gda96/AntigravityTray/releases/latest)**.
-2. Скачайте файл установщика **`AntigravityTray_Setup.exe`**.
-3. Запустите инсталлятор:
-   * Выберите папку установки (по умолчанию: `C:\Program Files\AntigravityTray`).
-   * Укажите путь к исполняемому файлу разработчика Unlocker (например, `AG_2.29.0.exe`).
+### ⬇️ Ссылки для скачивания свежей версии:
+
+| Файл | Назначение | Прямая ссылка |
+| :--- | :--- | :--- |
+| **`AntigravityTray_Setup.exe`** | **Мастер установки (Рекомендуется)** — устанавливает в `Program Files`, создаёт ярлыки и настраивает тихий автозапуск без UAC. | **[📥 Скачать Setup.exe](https://github.com/gda96/AntigravityTray/releases/latest/download/AntigravityTray_Setup.exe)** |
+| **`AntigravityTray.exe`** | **Портативная версия** — работает без установки из любой папки. | **[📥 Скачать Portable.exe](https://github.com/gda96/AntigravityTray/releases/latest/download/AntigravityTray.exe)** |
+
+*Все предыдущие выпуски и исходные коды доступны на странице **[Релизов GitHub](https://github.com/gda96/AntigravityTray/releases)**.*
+
+---
+
+### 🚀 Пошаговая инструкция:
+
+1. Скачайте инсталлятор по прямой ссылке: **[AntigravityTray_Setup.exe](https://github.com/gda96/AntigravityTray/releases/latest/download/AntigravityTray_Setup.exe)**.
+2. Запустите файл `AntigravityTray_Setup.exe`:
+   * При необходимости укажите путь к файлу разработчика Unlocker (например, `C:\VPN_AG\AG\AG_2.29.0.exe`).
    * Нажмите кнопку **«Установить»**.
-4. Готово! В трее появится иконка Antigravity, Unlocker запустится в фоне и будет готов к работе.
-
-> **Портативная версия:** Если вы не хотите устанавливать программу, просто скачайте автономный файл **`AntigravityTray.exe`** из релизов и положите его в удобную папку.
+3. Готово! В трее появится иконка Antigravity, Unlocker запустится в фоне и будет готов к работе.
 
 ---
 
