@@ -296,9 +296,9 @@ namespace AntigravityTray
             _trayIcon.MouseClick += OnTrayIconMouseClick;
             _trayIcon.DoubleClick += OnTrayIconDoubleClick;
 
-            // Monitor Timer
+            // Monitor Timer (1 second interval for 0% CPU footprint)
             _monitorTimer = new System.Windows.Forms.Timer();
-            _monitorTimer.Interval = 100;
+            _monitorTimer.Interval = 1000;
             _monitorTimer.Tick += OnMonitorTick;
             _monitorTimer.Start();
 
@@ -499,25 +499,41 @@ namespace AntigravityTray
 
         private void OnMonitorTick(object sender, EventArgs e)
         {
-            if (_targetPid > 0)
+            // Verify existing cached window and process
+            if (_targetHwnd != IntPtr.Zero)
             {
-                try
+                if (!IsWindow(_targetHwnd))
                 {
-                    Process p = Process.GetProcessById(_targetPid);
-                    if (p.HasExited)
+                    _targetHwnd = IntPtr.Zero;
+                    _targetPid = 0;
+                }
+                else if (_targetPid > 0)
+                {
+                    try
+                    {
+                        Process p = Process.GetProcessById(_targetPid);
+                        if (p.HasExited)
+                        {
+                            _targetHwnd = IntPtr.Zero;
+                            _targetPid = 0;
+                        }
+                    }
+                    catch
                     {
                         _targetHwnd = IntPtr.Zero;
                         _targetPid = 0;
                     }
                 }
-                catch
-                {
-                    _targetHwnd = IntPtr.Zero;
-                    _targetPid = 0;
-                }
             }
 
-            IntPtr hwnd = FindUnlockerWindow();
+            // Only perform EnumWindows search if we do NOT currently track a valid window
+            IntPtr hwnd = _targetHwnd;
+            if (hwnd == IntPtr.Zero)
+            {
+                hwnd = FindUnlockerWindow();
+                _targetHwnd = hwnd;
+            }
+
             if (hwnd != IntPtr.Zero)
             {
                 _targetHwnd = hwnd;
@@ -764,9 +780,24 @@ namespace AntigravityTray
 
             EnumWindows(delegate (IntPtr hWnd, IntPtr lParam)
             {
+                // Lightning fast filter 1: Class check (Rust egui/winit is always "Window Class")
+                StringBuilder sbClass = new StringBuilder(64);
+                GetClassName(hWnd, sbClass, 64);
+                string cls = sbClass.ToString();
+                if (cls != "Window Class") return true;
+
+                // Lightning fast filter 2: Title check (Rust egui starts with "Antigravity Unlocker")
+                StringBuilder sbTitle = new StringBuilder(256);
+                GetWindowText(hWnd, sbTitle, 256);
+                string title = sbTitle.ToString();
+                if (string.IsNullOrEmpty(title) || !title.StartsWith("Antigravity Unlocker", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                // Filter 3: Process check (only executed for actual candidates!)
                 uint pid;
                 GetWindowThreadProcessId(hWnd, out pid);
-
                 if (pid == Process.GetCurrentProcess().Id) return true;
 
                 Process p = null;
@@ -783,55 +814,33 @@ namespace AntigravityTray
 
                 string pName = p.ProcessName.ToLowerInvariant();
 
-                // STRICT EXCLUSIONS: Never attach to Web Browsers, IDEs, code editors, file explorers, or proxy services!
-                if (pName == "browser" || pName == "chrome" || pName == "msedge" ||
-                    pName == "firefox" || pName == "opera" || pName == "yandex" ||
-                    pName == "antigravity" || pName == "code" || pName == "explorer" ||
-                    pName == "devenv" || pName == "ag_dns" || pName == "cmd" || pName == "powershell")
-                {
-                    return true;
-                }
+                // Strict exclusion: never match browsers or proxy service
+                if (pName == "ag_dns" || pName == "browser" || pName == "chrome" || pName == "msedge") return true;
 
-                // Verify that this process belongs to Antigravity Unlocker
-                bool isUnlockerProc = false;
-
+                // Verify Unlocker process
+                bool isUnlocker = false;
                 if (!string.IsNullOrEmpty(_configuredUnlockerPath))
                 {
                     try
                     {
                         if (string.Equals(p.MainModule.FileName, _configuredUnlockerPath, StringComparison.OrdinalIgnoreCase))
                         {
-                            isUnlockerProc = true;
+                            isUnlocker = true;
                         }
                     }
                     catch { }
                 }
 
-                if (!isUnlockerProc)
+                if (!isUnlocker && (pName.StartsWith("ag_") || pName == "ag_unlocker" || pName == "antigravity_unlocker"))
                 {
-                    if (pName.StartsWith("ag_") || pName == "ag_unlocker" || pName == "antigravity_unlocker")
-                    {
-                        isUnlockerProc = true;
-                    }
+                    isUnlocker = true;
                 }
 
-                if (!isUnlockerProc) return true;
-
-                StringBuilder sbTitle = new StringBuilder(512);
-                GetWindowText(hWnd, sbTitle, 512);
-                string title = sbTitle.ToString();
-
-                StringBuilder sbClass = new StringBuilder(256);
-                GetClassName(hWnd, sbClass, 256);
-                string cls = sbClass.ToString();
-
-                // Check window properties:
-                // Rust eframe / egui uses "Window Class" or main title starting with "Antigravity Unlocker"
-                if (cls == "Window Class" || (!string.IsNullOrEmpty(title) && title.StartsWith("Antigravity Unlocker", StringComparison.OrdinalIgnoreCase)))
+                if (isUnlocker)
                 {
                     _targetPid = (int)pid;
                     foundHwnd = hWnd;
-                    return false; // Found real Unlocker! Stop enumeration.
+                    return false; // Found! Stop enumeration immediately.
                 }
 
                 return true;

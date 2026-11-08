@@ -54,7 +54,7 @@ namespace AntigravityTraySetup
         private void InitializeComponent()
         {
             this.Font = SystemFonts.MessageBoxFont ?? new Font("Segoe UI", 9F);
-            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.11";
+            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.12";
             this.Size = new Size(570, 525);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -486,7 +486,7 @@ namespace AntigravityTraySetup
                     if (targetKey != null)
                     {
                         targetKey.SetValue("DisplayName", "Antigravity Tray Companion");
-                        targetKey.SetValue("DisplayVersion", "1.1.11");
+                        targetKey.SetValue("DisplayVersion", "1.1.12");
                         targetKey.SetValue("Publisher", "Community");
                         targetKey.SetValue("DisplayIcon", targetExe + ",0");
                         targetKey.SetValue("InstallLocation", installDir);
