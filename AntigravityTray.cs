@@ -1,11 +1,16 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
 using Microsoft.Win32;
 
 namespace AntigravityTray
@@ -215,6 +220,13 @@ namespace AntigravityTray
         private IntPtr _mouseHookHandle = IntPtr.Zero;
         private IntPtr _keyboardHookHandle = IntPtr.Zero;
 
+        // Constants
+        public const string APP_VERSION = "1.1.13";
+        public const string GITHUB_REPO = "gda96/AntigravityTray";
+        private readonly SynchronizationContext _syncContext;
+        private UpdateInfo _pendingUpdateInfo = null;
+        private bool _isCheckingUpdates = false;
+
         // UI Menu items
         private readonly ToolStripMenuItem _itemStatus;
         private readonly ToolStripMenuItem _itemPath;
@@ -224,9 +236,11 @@ namespace AntigravityTray
         private readonly ToolStripMenuItem _itemSettings;
         private readonly ToolStripMenuItem _itemCloseToTray;
         private readonly ToolStripMenuItem _itemAutostart;
+        private readonly ToolStripMenuItem _itemCheckUpdates;
 
         public TrayApplicationContext()
         {
+            _syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             _configuredUnlockerPath = GetConfiguredUnlockerPath();
             _closeToTrayEnabled = IsCloseToTrayEnabled();
 
@@ -277,6 +291,9 @@ namespace AntigravityTray
             _itemAutostart.Checked = IsAutostartEnabled();
             menu.Items.Add(_itemAutostart);
 
+            _itemCheckUpdates = new ToolStripMenuItem("🔄 Проверить обновления...", null, OnCheckUpdatesClick);
+            menu.Items.Add(_itemCheckUpdates);
+
             menu.Items.Add(new ToolStripSeparator());
 
             ToolStripMenuItem itemExit = new ToolStripMenuItem("Выход", null, OnExitClick);
@@ -295,12 +312,30 @@ namespace AntigravityTray
 
             _trayIcon.MouseClick += OnTrayIconMouseClick;
             _trayIcon.DoubleClick += OnTrayIconDoubleClick;
+            _trayIcon.BalloonTipClicked += OnTrayBalloonClicked;
 
             // Monitor Timer (1 second interval for 0% CPU footprint)
             _monitorTimer = new System.Windows.Forms.Timer();
             _monitorTimer.Interval = 1000;
             _monitorTimer.Tick += OnMonitorTick;
             _monitorTimer.Start();
+
+            // Initial background update check after 3 seconds so startup remains instant
+            System.Windows.Forms.Timer initialUpdateTimer = new System.Windows.Forms.Timer();
+            initialUpdateTimer.Interval = 3000;
+            initialUpdateTimer.Tick += (s, e) =>
+            {
+                initialUpdateTimer.Stop();
+                initialUpdateTimer.Dispose();
+                CheckForUpdates(true);
+            };
+            initialUpdateTimer.Start();
+
+            // Periodic update check every 6 hours
+            System.Windows.Forms.Timer periodicUpdateTimer = new System.Windows.Forms.Timer();
+            periodicUpdateTimer.Interval = 6 * 3600 * 1000;
+            periodicUpdateTimer.Tick += (s, e) => CheckForUpdates(true);
+            periodicUpdateTimer.Start();
 
             // Auto-launch Unlocker if configured and not already running
             CheckAndAutoLaunchUnlocker();
@@ -728,6 +763,214 @@ namespace AntigravityTray
             bool currentState = IsAutostartEnabled();
             SetAutostart(!currentState);
             _itemAutostart.Checked = !currentState;
+        }
+
+        private void OnCheckUpdatesClick(object sender, EventArgs e)
+        {
+            if (_pendingUpdateInfo != null)
+            {
+                ShowUpdateDialog(_pendingUpdateInfo);
+            }
+            else
+            {
+                CheckForUpdates(false);
+            }
+        }
+
+        private void OnTrayBalloonClicked(object sender, EventArgs e)
+        {
+            if (_pendingUpdateInfo != null)
+            {
+                ShowUpdateDialog(_pendingUpdateInfo);
+            }
+        }
+
+        public void CheckForUpdates(bool silent)
+        {
+            if (_isCheckingUpdates)
+            {
+                if (!silent)
+                {
+                    MessageBox.Show(
+                        "Проверка обновлений уже выполняется...",
+                        "Обновление",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+                return;
+            }
+
+            _isCheckingUpdates = true;
+            if (!silent)
+            {
+                _itemCheckUpdates.Text = "🔄 Проверка обновлений...";
+                _itemCheckUpdates.Enabled = false;
+            }
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                UpdateInfo info = null;
+                string errorMsg = null;
+
+                try
+                {
+                    info = FetchLatestReleaseInfo(GITHUB_REPO);
+                }
+                catch (Exception ex)
+                {
+                    errorMsg = ex.Message;
+                }
+
+                _syncContext.Post(__ =>
+                {
+                    _isCheckingUpdates = false;
+                    _itemCheckUpdates.Enabled = true;
+
+                    if (info != null && IsNewerVersion(info.TagName, APP_VERSION))
+                    {
+                        _pendingUpdateInfo = info;
+                        _itemCheckUpdates.Text = "⭐ Доступно обновление " + info.TagName + "!";
+                        _itemCheckUpdates.Font = new Font(_itemCheckUpdates.Font, FontStyle.Bold);
+
+                        if (silent)
+                        {
+                            _trayIcon.ShowBalloonTip(
+                                5000,
+                                "Доступно обновление Antigravity Tray " + info.TagName,
+                                "Нажмите здесь, чтобы посмотреть список изменений и обновить программу.",
+                                ToolTipIcon.Info
+                            );
+                        }
+                        else
+                        {
+                            ShowUpdateDialog(info);
+                        }
+                    }
+                    else
+                    {
+                        _itemCheckUpdates.Text = "🔄 Проверить обновления...";
+                        _itemCheckUpdates.Font = new Font(_itemCheckUpdates.Font, FontStyle.Regular);
+
+                        if (!silent)
+                        {
+                            if (!string.IsNullOrEmpty(errorMsg))
+                            {
+                                MessageBox.Show(
+                                    "Не удалось проверить обновления:\n" + errorMsg + "\n\nПроверьте подключение к Интернету или посетите страницу GitHub.",
+                                    "Проверка обновлений",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Warning
+                                );
+                            }
+                            else
+                            {
+                                MessageBox.Show(
+                                    "У вас установлена самая последняя актуальная версия Antigravity Tray Companion (v" + APP_VERSION + ").\n\nОбновлений не требуется.",
+                                    "Обновление программы",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Information
+                                );
+                            }
+                        }
+                    }
+                }, null);
+            });
+        }
+
+        private void ShowUpdateDialog(UpdateInfo info)
+        {
+            try
+            {
+                using (UpdateForm form = new UpdateForm(info, LoadAppIcon()))
+                {
+                    form.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Ошибка открытия окна обновления: " + ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        public static UpdateInfo FetchLatestReleaseInfo(string repo)
+        {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            using (WebClient client = new WebClient())
+            {
+                client.Headers["User-Agent"] = "AntigravityTray-Updater/" + APP_VERSION;
+                client.Headers["Accept"] = "application/vnd.github.v3+json";
+                client.Encoding = Encoding.UTF8;
+
+                string url = "https://api.github.com/repos/" + repo + "/releases/latest";
+                string json = client.DownloadString(url);
+
+                JavaScriptSerializer serializer = new JavaScriptSerializer();
+                Dictionary<string, object> dict = serializer.Deserialize<Dictionary<string, object>>(json);
+
+                if (dict == null) return null;
+
+                UpdateInfo info = new UpdateInfo();
+                info.TagName = dict.ContainsKey("tag_name") ? Convert.ToString(dict["tag_name"]) : "";
+                info.Version = info.TagName.TrimStart('v', 'V');
+                info.Title = dict.ContainsKey("name") ? Convert.ToString(dict["name"]) : info.TagName;
+                info.Changelog = dict.ContainsKey("body") ? Convert.ToString(dict["body"]) : "";
+                info.HtmlUrl = dict.ContainsKey("html_url") ? Convert.ToString(dict["html_url"]) : "https://github.com/" + repo;
+
+                if (dict.ContainsKey("assets") && dict["assets"] is ArrayList)
+                {
+                    ArrayList assets = (ArrayList)dict["assets"];
+                    foreach (object item in assets)
+                    {
+                        if (item is Dictionary<string, object>)
+                        {
+                            Dictionary<string, object> asset = (Dictionary<string, object>)item;
+                            string assetName = asset.ContainsKey("name") ? Convert.ToString(asset["name"]) : "";
+                            string assetUrl = asset.ContainsKey("browser_download_url") ? Convert.ToString(asset["browser_download_url"]) : "";
+                            long assetSize = 0;
+                            if (asset.ContainsKey("size")) long.TryParse(Convert.ToString(asset["size"]), out assetSize);
+
+                            if (assetName.Equals("AntigravityTray_Setup.exe", StringComparison.OrdinalIgnoreCase))
+                            {
+                                info.SetupDownloadUrl = assetUrl;
+                                info.SetupSize = assetSize;
+                            }
+                            else if (assetName.Equals("AntigravityTray.exe", StringComparison.OrdinalIgnoreCase))
+                            {
+                                info.ExeDownloadUrl = assetUrl;
+                                info.ExeSize = assetSize;
+                            }
+                        }
+                    }
+                }
+
+                return info;
+            }
+        }
+
+        public static bool IsNewerVersion(string latestTag, string currentVersion)
+        {
+            if (string.IsNullOrEmpty(latestTag)) return false;
+            string vClean = latestTag.Trim().TrimStart('v', 'V');
+            string cClean = currentVersion.Trim().TrimStart('v', 'V');
+
+            Version vLatest, vCurrent;
+            if (Version.TryParse(NormalizeVersionString(vClean), out vLatest) &&
+                Version.TryParse(NormalizeVersionString(cClean), out vCurrent))
+            {
+                return vLatest > vCurrent;
+            }
+
+            return string.Compare(vClean, cClean, StringComparison.OrdinalIgnoreCase) > 0;
+        }
+
+        private static string NormalizeVersionString(string v)
+        {
+            string[] parts = v.Split('.');
+            if (parts.Length == 1) return v + ".0.0.0";
+            if (parts.Length == 2) return v + ".0.0";
+            if (parts.Length == 3) return v + ".0";
+            return v;
         }
 
         private void OnExitClick(object sender, EventArgs e)
@@ -1170,6 +1413,369 @@ namespace AntigravityTray
             {
                 MessageBox.Show("Ошибка при удалении: " + ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+    }
+
+    public class UpdateInfo
+    {
+        public string TagName { get; set; }
+        public string Version { get; set; }
+        public string Title { get; set; }
+        public string Changelog { get; set; }
+        public string HtmlUrl { get; set; }
+        public string SetupDownloadUrl { get; set; }
+        public string ExeDownloadUrl { get; set; }
+        public long SetupSize { get; set; }
+        public long ExeSize { get; set; }
+    }
+
+    public class UpdateForm : Form
+    {
+        private readonly UpdateInfo _info;
+        private readonly ProgressBar _progressBar;
+        private readonly Label _lblProgress;
+        private readonly Button _btnUpdate;
+        private readonly Button _btnGitHub;
+        private readonly Button _btnClose;
+        private readonly RichTextBox _txtChangelog;
+        private WebClient _webClient = null;
+
+        public UpdateForm(UpdateInfo info, Icon icon)
+        {
+            _info = info;
+
+            Text = "Обновление Antigravity Tray Companion";
+            Size = new Size(580, 480);
+            MinimumSize = new Size(520, 420);
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = true;
+            BackColor = Color.FromArgb(248, 249, 250);
+            if (icon != null) Icon = icon;
+
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular);
+
+            // Banner Panel (Top)
+            Panel pnlHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 85,
+                BackColor = Color.FromArgb(24, 28, 36),
+                Padding = new Padding(20, 14, 20, 10)
+            };
+
+            Label lblTitle = new Label
+            {
+                Text = "🚀 Доступно обновление " + _info.TagName,
+                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(255, 255, 255),
+                AutoSize = true,
+                Location = new Point(18, 14)
+            };
+            pnlHeader.Controls.Add(lblTitle);
+
+            Label lblSub = new Label
+            {
+                Text = string.Format("Текущая версия: v{0}  •  Новая версия: {1}  •  GitHub Releases",
+                    TrayApplicationContext.APP_VERSION, _info.TagName),
+                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                ForeColor = Color.FromArgb(170, 185, 205),
+                AutoSize = true,
+                Location = new Point(20, 46)
+            };
+            pnlHeader.Controls.Add(lblSub);
+            Controls.Add(pnlHeader);
+
+            // Middle: Changelog
+            Label lblChangelogTitle = new Label
+            {
+                Text = "Что нового в этой версии:",
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(40, 40, 40),
+                Location = new Point(20, 98),
+                AutoSize = true
+            };
+            Controls.Add(lblChangelogTitle);
+
+            _txtChangelog = new RichTextBox
+            {
+                Location = new Point(20, 124),
+                Size = new Size(524, 210),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                ReadOnly = true,
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(30, 30, 30),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                Text = string.IsNullOrEmpty(_info.Changelog) ? "Описание обновления не указано." : _info.Changelog.Replace("\r\n", "\n").Replace("\n", "\r\n"),
+                ScrollBars = RichTextBoxScrollBars.Vertical
+            };
+            Controls.Add(_txtChangelog);
+
+            // Bottom Progress section
+            _lblProgress = new Label
+            {
+                Location = new Point(20, 344),
+                Size = new Size(524, 20),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Regular),
+                ForeColor = Color.FromArgb(70, 70, 70),
+                Text = "",
+                Visible = false
+            };
+            Controls.Add(_lblProgress);
+
+            _progressBar = new ProgressBar
+            {
+                Location = new Point(20, 366),
+                Size = new Size(524, 18),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0,
+                Visible = false
+            };
+            Controls.Add(_progressBar);
+
+            // Action Buttons Panel
+            _btnUpdate = new Button
+            {
+                Text = "⚡ Обновить сейчас",
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Location = new Point(20, 394),
+                Size = new Size(160, 34),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+                FlatStyle = FlatStyle.System,
+                Cursor = Cursors.Hand
+            };
+            _btnUpdate.Click += OnStartUpdateClick;
+            Controls.Add(_btnUpdate);
+
+            _btnGitHub = new Button
+            {
+                Text = "🌐 Открыть GitHub",
+                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                Location = new Point(190, 394),
+                Size = new Size(130, 34),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+                FlatStyle = FlatStyle.System,
+                Cursor = Cursors.Hand
+            };
+            _btnGitHub.Click += (s, e) =>
+            {
+                try
+                {
+                    string target = !string.IsNullOrEmpty(_info.HtmlUrl) ? _info.HtmlUrl : "https://github.com/gda96/AntigravityTray";
+                    Process.Start(target);
+                }
+                catch { }
+            };
+            Controls.Add(_btnGitHub);
+
+            _btnClose = new Button
+            {
+                Text = "Позже",
+                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                Location = new Point(434, 394),
+                Size = new Size(110, 34),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                FlatStyle = FlatStyle.System,
+                DialogResult = DialogResult.Cancel
+            };
+            _btnClose.Click += (s, e) => Close();
+            Controls.Add(_btnClose);
+
+            CancelButton = _btnClose;
+        }
+
+        private void OnStartUpdateClick(object sender, EventArgs e)
+        {
+            _btnUpdate.Enabled = false;
+            _btnClose.Enabled = false;
+            _lblProgress.Visible = true;
+            _progressBar.Visible = true;
+            _progressBar.Value = 0;
+            _lblProgress.Text = "Подготовка к загрузке обновления...";
+
+            bool isInstalledInProgramFiles = AppDomain.CurrentDomain.BaseDirectory.StartsWith(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                StringComparison.OrdinalIgnoreCase
+            );
+
+            string downloadUrl = "";
+            string tempFile = "";
+            bool isSetupMode = false;
+
+            if (isInstalledInProgramFiles || !string.IsNullOrEmpty(_info.SetupDownloadUrl))
+            {
+                if (!string.IsNullOrEmpty(_info.SetupDownloadUrl))
+                {
+                    downloadUrl = _info.SetupDownloadUrl;
+                    tempFile = Path.Combine(Path.GetTempPath(), "AntigravityTray_Setup_New.exe");
+                    isSetupMode = true;
+                }
+                else
+                {
+                    downloadUrl = _info.ExeDownloadUrl;
+                    tempFile = Path.Combine(Path.GetTempPath(), "AntigravityTray_New.exe");
+                    isSetupMode = false;
+                }
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(_info.ExeDownloadUrl))
+                {
+                    downloadUrl = _info.ExeDownloadUrl;
+                    tempFile = Path.Combine(Path.GetTempPath(), "AntigravityTray_New.exe");
+                    isSetupMode = false;
+                }
+                else
+                {
+                    downloadUrl = _info.SetupDownloadUrl;
+                    tempFile = Path.Combine(Path.GetTempPath(), "AntigravityTray_Setup_New.exe");
+                    isSetupMode = true;
+                }
+            }
+
+            if (string.IsNullOrEmpty(downloadUrl))
+            {
+                MessageBox.Show(
+                    "В данном релизе не найден файл установщика или исполняемый файл.\n\nПожалуйста, перейдите на страницу релиза на GitHub для скачивания вручную.",
+                    "Ошибка обновления",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                _btnUpdate.Enabled = true;
+                _btnClose.Enabled = true;
+                _progressBar.Visible = false;
+                _lblProgress.Visible = false;
+                return;
+            }
+
+            try
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+            }
+            catch { }
+
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            _webClient = new WebClient();
+            _webClient.Headers["User-Agent"] = "AntigravityTray-Updater/" + TrayApplicationContext.APP_VERSION;
+
+            _webClient.DownloadProgressChanged += (s, args) =>
+            {
+                _progressBar.Value = args.ProgressPercentage;
+                double mbReceived = args.BytesReceived / (1024.0 * 1024.0);
+                double mbTotal = args.TotalBytesToReceive / (1024.0 * 1024.0);
+                if (mbTotal > 0.05)
+                {
+                    _lblProgress.Text = string.Format("Загрузка: {0}% ({1:F2} МБ из {2:F2} МБ)", args.ProgressPercentage, mbReceived, mbTotal);
+                }
+                else
+                {
+                    _lblProgress.Text = string.Format("Загрузка: {0:F2} МБ...", mbReceived);
+                }
+            };
+
+            _webClient.DownloadFileCompleted += (s, args) =>
+            {
+                if (args.Error != null)
+                {
+                    MessageBox.Show(
+                        "Ошибка скачивания обновления:\n" + args.Error.Message,
+                        "Ошибка загрузки",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    _btnUpdate.Enabled = true;
+                    _btnClose.Enabled = true;
+                    _progressBar.Visible = false;
+                    _lblProgress.Text = "Загрузка прервана.";
+                    return;
+                }
+
+                _lblProgress.Text = "Загрузка завершена! Применение обновления...";
+                _progressBar.Value = 100;
+
+                try
+                {
+                    if (isSetupMode)
+                    {
+                        // Launch Installer in silent update mode with UAC elevation
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = tempFile,
+                            Arguments = "/update",
+                            Verb = "runas",
+                            UseShellExecute = true
+                        };
+                        Process.Start(psi);
+                        Application.Exit();
+                    }
+                    else
+                    {
+                        // Portable Mode: spawn self-updating script and exit
+                        string currentExe = Application.ExecutablePath;
+                        string batchPath = Path.Combine(Path.GetTempPath(), "update_tray_companion.bat");
+                        string script = string.Format(
+                            "@echo off\r\n" +
+                            "timeout /t 1 /nobreak >nul\r\n" +
+                            ":retry\r\n" +
+                            "copy /y \"{0}\" \"{1}\" >nul\r\n" +
+                            "if errorlevel 1 (\r\n" +
+                            "    timeout /t 1 /nobreak >nul\r\n" +
+                            "    goto retry\r\n" +
+                            ")\r\n" +
+                            "del \"{0}\"\r\n" +
+                            "start \"\" \"{1}\"\r\n" +
+                            "del \"%~f0\"\r\n",
+                            tempFile,
+                            currentExe
+                        );
+
+                        File.WriteAllText(batchPath, script, Encoding.Default);
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = batchPath,
+                            WindowStyle = ProcessWindowStyle.Hidden,
+                            CreateNoWindow = true,
+                            UseShellExecute = true
+                        };
+                        Process.Start(psi);
+                        Application.Exit();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        "Ошибка применения обновления:\n" + ex.Message,
+                        "Ошибка обновления",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    _btnUpdate.Enabled = true;
+                    _btnClose.Enabled = true;
+                }
+            };
+
+            _lblProgress.Text = "Подключение к GitHub...";
+            _webClient.DownloadFileAsync(new Uri(downloadUrl), tempFile);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (_webClient != null && _webClient.IsBusy)
+            {
+                if (MessageBox.Show("Загрузка обновления ещё выполняется. Прервать?", "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+                _webClient.CancelAsync();
+            }
+            base.OnFormClosing(e);
         }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -10,6 +11,9 @@ namespace AntigravityTraySetup
 {
     static class Program
     {
+        public static readonly string APP_VERSION = Assembly.GetExecutingAssembly().GetName().Version != null ? 
+            string.Format("{0}.{1}.{2}", Assembly.GetExecutingAssembly().GetName().Version.Major, Assembly.GetExecutingAssembly().GetName().Version.Minor, Assembly.GetExecutingAssembly().GetName().Version.Build) : "1.1.13";
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
 
@@ -17,7 +21,7 @@ namespace AntigravityTraySetup
         private static extern bool SetProcessDPIAware();
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             try
             {
@@ -28,9 +32,111 @@ namespace AntigravityTraySetup
                 try { SetProcessDPIAware(); } catch { }
             }
 
+            if (args != null && args.Length > 0)
+            {
+                string a = args[0].ToLowerInvariant();
+                if (a == "/silent" || a == "/s" || a == "/update" || a == "-silent" || a == "-update")
+                {
+                    PerformSilentUpdate();
+                    return;
+                }
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new SetupForm());
+        }
+
+        public static void ExtractOrCopyFile(string srcPath, string resName, string targetPath)
+        {
+            if (File.Exists(srcPath))
+            {
+                try { File.Copy(srcPath, targetPath, true); return; } catch { }
+            }
+
+            try
+            {
+                using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resName))
+                {
+                    if (stream != null)
+                    {
+                        using (FileStream fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
+                        {
+                            byte[] buffer = new byte[81920];
+                            int read;
+                            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                fs.Write(buffer, 0, read);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public static void PerformSilentUpdate()
+        {
+            try
+            {
+                // Terminate any running instances of AntigravityTray
+                Process[] runningTrays = Process.GetProcessesByName("AntigravityTray");
+                foreach (Process pt in runningTrays)
+                {
+                    try
+                    {
+                        pt.Kill();
+                        pt.WaitForExit(2000);
+                    }
+                    catch { }
+                }
+
+                string installDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "AntigravityTray");
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\AntigravityTray"))
+                {
+                    if (key != null)
+                    {
+                        string loc = key.GetValue("InstallLocation") as string;
+                        if (!string.IsNullOrEmpty(loc) && Directory.Exists(loc)) installDir = loc;
+                    }
+                }
+
+                Directory.CreateDirectory(installDir);
+
+                string sourceDir = AppDomain.CurrentDomain.BaseDirectory;
+                string srcExe = Path.Combine(sourceDir, "AntigravityTray.exe");
+                string srcIcon = Path.Combine(sourceDir, "icon.ico");
+                string srcReadme = Path.Combine(sourceDir, "README.md");
+
+                string targetExe = Path.Combine(installDir, "AntigravityTray.exe");
+                string targetIcon = Path.Combine(installDir, "icon.ico");
+                string targetReadme = Path.Combine(installDir, "README.md");
+
+                ExtractOrCopyFile(srcExe, "AntigravityTray.exe", targetExe);
+                ExtractOrCopyFile(srcIcon, "icon.ico", targetIcon);
+                if (File.Exists(srcReadme)) try { File.Copy(srcReadme, targetReadme, true); } catch { }
+
+                // Update registry version
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\AntigravityTray", true))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue("DisplayVersion", APP_VERSION);
+                    }
+                }
+
+                // Restart AntigravityTray
+                if (File.Exists(targetExe))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = targetExe,
+                        WorkingDirectory = installDir,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            catch { }
         }
     }
 
@@ -54,7 +160,7 @@ namespace AntigravityTraySetup
         private void InitializeComponent()
         {
             this.Font = SystemFonts.MessageBoxFont ?? new Font("Segoe UI", 9F);
-            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.12";
+            this.Text = "Мастер установки - Antigravity Tray Companion v" + Program.APP_VERSION;
             this.Size = new Size(570, 525);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -388,9 +494,9 @@ namespace AntigravityTraySetup
                 string targetIcon = Path.Combine(installDir, "icon.ico");
                 string targetReadme = Path.Combine(installDir, "README.md");
 
-                if (File.Exists(srcExe)) File.Copy(srcExe, targetExe, true);
-                if (File.Exists(srcIcon)) File.Copy(srcIcon, targetIcon, true);
-                if (File.Exists(srcReadme)) File.Copy(srcReadme, targetReadme, true);
+                Program.ExtractOrCopyFile(srcExe, "AntigravityTray.exe", targetExe);
+                Program.ExtractOrCopyFile(srcIcon, "icon.ico", targetIcon);
+                if (File.Exists(srcReadme)) try { File.Copy(srcReadme, targetReadme, true); } catch { }
 
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\AntigravityTray"))
                 {
@@ -486,7 +592,7 @@ namespace AntigravityTraySetup
                     if (targetKey != null)
                     {
                         targetKey.SetValue("DisplayName", "Antigravity Tray Companion");
-                        targetKey.SetValue("DisplayVersion", "1.1.12");
+                        targetKey.SetValue("DisplayVersion", Program.APP_VERSION);
                         targetKey.SetValue("Publisher", "Community");
                         targetKey.SetValue("DisplayIcon", targetExe + ",0");
                         targetKey.SetValue("InstallLocation", installDir);

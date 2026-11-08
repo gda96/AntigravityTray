@@ -18,7 +18,7 @@ Write-Host "1. Compiling AntigravityTray.exe (High-DPI PerMonitorV2, asInvoker).
 & $CscPath /nologo /target:winexe /optimize+ /platform:anycpu `
     /win32icon:"$IconPath" `
     /win32manifest:"$AppManifest" `
-    /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll,Microsoft.CSharp.dll `
+    /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Web.Extensions.dll,Microsoft.CSharp.dll `
     /out:"$TrayOut" "$AssemblyPath" "$TraySource"
 
 if ($LASTEXITCODE -ne 0) {
@@ -33,6 +33,8 @@ Write-Host "2. Compiling AntigravityTray_Setup.exe (Program Files Installer, req
 & $CscPath /nologo /target:winexe /optimize+ /platform:anycpu `
     /win32icon:"$IconPath" `
     /win32manifest:"$InstallerManifest" `
+    /resource:"$TrayOut",AntigravityTray.exe `
+    /resource:"$IconPath",icon.ico `
     /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll,Microsoft.CSharp.dll `
     /out:"$InstallerOut" "$AssemblyPath" "$InstallerSource"
 
