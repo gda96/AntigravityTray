@@ -1,0 +1,11 @@
+# Build artifacts
+*.pdb
+*.obj
+*.log
+bin/
+obj/
+
+# User-specific
+.vs/
+.idea/
+*.user
