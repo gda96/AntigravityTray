@@ -54,7 +54,7 @@ namespace AntigravityTraySetup
         private void InitializeComponent()
         {
             this.Font = SystemFonts.MessageBoxFont ?? new Font("Segoe UI", 9F);
-            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.10";
+            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.11";
             this.Size = new Size(570, 525);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -81,6 +81,16 @@ namespace AntigravityTraySetup
             };
             this.Controls.Add(pnlHeader);
 
+            Image headerBmp = null;
+            try
+            {
+                string png1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.png");
+                string png2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"assets\icon.png");
+                if (File.Exists(png1)) headerBmp = Image.FromFile(png1);
+                else if (File.Exists(png2)) headerBmp = Image.FromFile(png2);
+            }
+            catch { }
+
             Panel pnlHeaderIcon = new Panel
             {
                 Location = new Point(16, 16),
@@ -89,9 +99,15 @@ namespace AntigravityTraySetup
             };
             pnlHeaderIcon.Paint += (s, pe) =>
             {
-                if (this.Icon != null)
+                pe.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                pe.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                pe.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                if (headerBmp != null)
                 {
-                    pe.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    pe.Graphics.DrawImage(headerBmp, new Rectangle(0, 0, 48, 48));
+                }
+                else if (this.Icon != null)
+                {
                     pe.Graphics.DrawIcon(this.Icon, new Rectangle(0, 0, 48, 48));
                 }
             };
@@ -470,7 +486,7 @@ namespace AntigravityTraySetup
                     if (targetKey != null)
                     {
                         targetKey.SetValue("DisplayName", "Antigravity Tray Companion");
-                        targetKey.SetValue("DisplayVersion", "1.1.10");
+                        targetKey.SetValue("DisplayVersion", "1.1.11");
                         targetKey.SetValue("Publisher", "Community");
                         targetKey.SetValue("DisplayIcon", targetExe + ",0");
                         targetKey.SetValue("InstallLocation", installDir);
