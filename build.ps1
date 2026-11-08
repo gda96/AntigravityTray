@@ -44,4 +44,5 @@ if ($LASTEXITCODE -ne 0) {
 $fileInfoSetup = Get-Item $InstallerOut
 Write-Host "   -> Success: $([math]::Round($fileInfoSetup.Length / 1KB, 2)) KB" -ForegroundColor Green
 
-Write-Host "`nAll builds v1.1.9 completed successfully!" -ForegroundColor Green
+$ver = (Get-Content "$PSScriptRoot\VERSION").Trim()
+Write-Host "`nAll builds v$ver completed successfully!" -ForegroundColor Green

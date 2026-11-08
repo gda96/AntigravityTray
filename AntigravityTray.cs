@@ -76,7 +76,9 @@ namespace AntigravityTray
         private const int WM_LBUTTONDOWN = 0x0201;
         private const int WM_LBUTTONUP = 0x0202;
         private const int WM_KEYDOWN = 0x0100;
+        private const int WM_KEYUP = 0x0101;
         private const int WM_SYSKEYDOWN = 0x0104;
+        private const int WM_SYSKEYUP = 0x0105;
         private const int VK_F4 = 0x73;
         private const int VK_MENU = 0x12; // Alt key
         private const uint GA_ROOT = 2;
@@ -409,32 +411,49 @@ namespace AntigravityTray
 
         private IntPtr LowLevelKeyboardCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && ((int)wParam == WM_KEYDOWN || (int)wParam == WM_SYSKEYDOWN))
+            if (nCode >= 0)
             {
-                if (_closeToTrayEnabled && _targetHwnd != IntPtr.Zero && IsWindow(_targetHwnd))
+                int msg = (int)wParam;
+                if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYUP)
                 {
-                    KBDLLHOOKSTRUCT kbdData = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-
-                    // Check for Alt + F4
-                    if (kbdData.vkCode == VK_F4 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0)
+                    if (_closeToTrayEnabled && _targetHwnd != IntPtr.Zero && IsWindow(_targetHwnd))
                     {
-                        IntPtr fgWnd = GetForegroundWindow();
-                        if (fgWnd == _targetHwnd || GetAncestor(fgWnd, GA_ROOT) == _targetHwnd)
-                        {
-                            ShowWindow(_targetHwnd, SW_HIDE);
+                        KBDLLHOOKSTRUCT kbdData = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
 
-                            if (!_firstCloseBalloonShown)
+                        // Check for Alt + F4
+                        if (kbdData.vkCode == VK_F4 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0)
+                        {
+                            IntPtr fgWnd = GetForegroundWindow();
+                            uint fgPid = 0;
+                            if (fgWnd != IntPtr.Zero)
                             {
-                                _firstCloseBalloonShown = true;
-                                _trayIcon.ShowBalloonTip(
-                                    2500,
-                                    "Antigravity Unlocker",
-                                    "Окно спрятано в трей (Alt + F4) и работает в фоне.",
-                                    ToolTipIcon.Info
-                                );
+                                GetWindowThreadProcessId(fgWnd, out fgPid);
                             }
 
-                            return (IntPtr)1; // Swallow Alt+F4!
+                            bool isFgUnlocker = (fgWnd == _targetHwnd || 
+                                                GetAncestor(fgWnd, GA_ROOT) == _targetHwnd || 
+                                                (_targetPid > 0 && fgPid == (uint)_targetPid));
+
+                            if (isFgUnlocker)
+                            {
+                                if (msg == WM_SYSKEYDOWN || msg == WM_KEYDOWN)
+                                {
+                                    ShowWindow(_targetHwnd, SW_HIDE);
+
+                                    if (!_firstCloseBalloonShown)
+                                    {
+                                        _firstCloseBalloonShown = true;
+                                        _trayIcon.ShowBalloonTip(
+                                            2500,
+                                            "Antigravity Unlocker",
+                                            "Окно спрятано в трей (Alt + F4) и работает в фоне.",
+                                            ToolTipIcon.Info
+                                        );
+                                    }
+                                }
+
+                                return (IntPtr)1; // Swallow Alt+F4 completely so Unlocker never closes!
+                            }
                         }
                     }
                 }
@@ -480,6 +499,24 @@ namespace AntigravityTray
 
         private void OnMonitorTick(object sender, EventArgs e)
         {
+            if (_targetPid > 0)
+            {
+                try
+                {
+                    Process p = Process.GetProcessById(_targetPid);
+                    if (p.HasExited)
+                    {
+                        _targetHwnd = IntPtr.Zero;
+                        _targetPid = 0;
+                    }
+                }
+                catch
+                {
+                    _targetHwnd = IntPtr.Zero;
+                    _targetPid = 0;
+                }
+            }
+
             IntPtr hwnd = FindUnlockerWindow();
             if (hwnd != IntPtr.Zero)
             {
@@ -542,6 +579,7 @@ namespace AntigravityTray
             else
             {
                 _targetHwnd = IntPtr.Zero;
+                _targetPid = 0;
                 _itemStatus.Text = "Статус: Unlocker не запущен";
                 _itemToggle.Text = "Развернуть / Запустить";
                 _itemLaunch.Enabled = true;
@@ -566,6 +604,8 @@ namespace AntigravityTray
             IntPtr hwnd = FindUnlockerWindow();
             if (hwnd == IntPtr.Zero)
             {
+                _targetHwnd = IntPtr.Zero;
+                _targetPid = 0;
                 LaunchUnlocker();
                 return;
             }
@@ -708,6 +748,16 @@ namespace AntigravityTray
             Application.Exit();
         }
 
+        public void ExitWithoutPrompt()
+        {
+            _monitorTimer.Stop();
+            UninstallHooks();
+            UnregisterHotKey(_messageWindow.Handle, HOTKEY_ID);
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            Application.Exit();
+        }
+
         private IntPtr FindUnlockerWindow()
         {
             IntPtr foundHwnd = IntPtr.Zero;
@@ -719,6 +769,54 @@ namespace AntigravityTray
 
                 if (pid == Process.GetCurrentProcess().Id) return true;
 
+                Process p = null;
+                try
+                {
+                    p = Process.GetProcessById((int)pid);
+                }
+                catch
+                {
+                    return true;
+                }
+
+                if (p == null) return true;
+
+                string pName = p.ProcessName.ToLowerInvariant();
+
+                // STRICT EXCLUSIONS: Never attach to Web Browsers, IDEs, code editors, file explorers, or proxy services!
+                if (pName == "browser" || pName == "chrome" || pName == "msedge" ||
+                    pName == "firefox" || pName == "opera" || pName == "yandex" ||
+                    pName == "antigravity" || pName == "code" || pName == "explorer" ||
+                    pName == "devenv" || pName == "ag_dns" || pName == "cmd" || pName == "powershell")
+                {
+                    return true;
+                }
+
+                // Verify that this process belongs to Antigravity Unlocker
+                bool isUnlockerProc = false;
+
+                if (!string.IsNullOrEmpty(_configuredUnlockerPath))
+                {
+                    try
+                    {
+                        if (string.Equals(p.MainModule.FileName, _configuredUnlockerPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isUnlockerProc = true;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (!isUnlockerProc)
+                {
+                    if (pName.StartsWith("ag_") || pName == "ag_unlocker" || pName == "antigravity_unlocker")
+                    {
+                        isUnlockerProc = true;
+                    }
+                }
+
+                if (!isUnlockerProc) return true;
+
                 StringBuilder sbTitle = new StringBuilder(512);
                 GetWindowText(hWnd, sbTitle, 512);
                 string title = sbTitle.ToString();
@@ -727,47 +825,14 @@ namespace AntigravityTray
                 GetClassName(hWnd, sbClass, 256);
                 string cls = sbClass.ToString();
 
-                if (!string.IsNullOrEmpty(title) && title.IndexOf("Antigravity Unlocker", StringComparison.OrdinalIgnoreCase) >= 0)
+                // Check window properties:
+                // Rust eframe / egui uses "Window Class" or main title starting with "Antigravity Unlocker"
+                if (cls == "Window Class" || (!string.IsNullOrEmpty(title) && title.StartsWith("Antigravity Unlocker", StringComparison.OrdinalIgnoreCase)))
                 {
                     _targetPid = (int)pid;
                     foundHwnd = hWnd;
-                    return false;
+                    return false; // Found real Unlocker! Stop enumeration.
                 }
-
-                if (!string.IsNullOrEmpty(_configuredUnlockerPath))
-                {
-                    try
-                    {
-                        Process p = Process.GetProcessById((int)pid);
-                        if (string.Equals(p.MainModule.FileName, _configuredUnlockerPath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (cls == "Window Class" || sbTitle.Length > 0)
-                            {
-                                _targetPid = (int)pid;
-                                foundHwnd = hWnd;
-                                return false;
-                            }
-                        }
-                    }
-                    catch { }
-                }
-
-                try
-                {
-                    Process p = Process.GetProcessById((int)pid);
-                    string pName = p.ProcessName.ToLowerInvariant();
-
-                    if (pName.StartsWith("ag_") || pName == "ag_unlocker" || pName == "antigravity_unlocker")
-                    {
-                        if (cls == "Window Class" || sbTitle.Length > 0)
-                        {
-                            _targetPid = (int)pid;
-                            foundHwnd = hWnd;
-                            return false;
-                        }
-                    }
-                }
-                catch { }
 
                 return true;
             }, IntPtr.Zero);
@@ -1041,6 +1106,11 @@ namespace AntigravityTray
                 if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HOTKEY_ID)
                 {
                     _parent.ToggleVisibility();
+                }
+                else if (m.Msg == WM_CLOSE)
+                {
+                    _parent.ExitWithoutPrompt();
+                    return;
                 }
                 base.WndProc(ref m);
             }

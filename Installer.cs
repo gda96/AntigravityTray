@@ -54,7 +54,7 @@ namespace AntigravityTraySetup
         private void InitializeComponent()
         {
             this.Font = SystemFonts.MessageBoxFont ?? new Font("Segoe UI", 9F);
-            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.9";
+            this.Text = "Мастер установки - Antigravity Tray Companion v1.1.10";
             this.Size = new Size(570, 525);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -349,6 +349,18 @@ namespace AntigravityTraySetup
 
             try
             {
+                // Terminate any running instances so files are not locked
+                Process[] runningTrays = Process.GetProcessesByName("AntigravityTray");
+                foreach (Process pt in runningTrays)
+                {
+                    try
+                    {
+                        pt.Kill();
+                        pt.WaitForExit(2000);
+                    }
+                    catch { }
+                }
+
                 Directory.CreateDirectory(installDir);
 
                 string sourceDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -458,7 +470,7 @@ namespace AntigravityTraySetup
                     if (targetKey != null)
                     {
                         targetKey.SetValue("DisplayName", "Antigravity Tray Companion");
-                        targetKey.SetValue("DisplayVersion", "1.1.9");
+                        targetKey.SetValue("DisplayVersion", "1.1.10");
                         targetKey.SetValue("Publisher", "Community");
                         targetKey.SetValue("DisplayIcon", targetExe + ",0");
                         targetKey.SetValue("InstallLocation", installDir);
