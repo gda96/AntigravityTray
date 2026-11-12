@@ -230,7 +230,7 @@ namespace AntigravityTray
         private IntPtr _keyboardHookHandle = IntPtr.Zero;
 
         // Constants
-        public const string APP_VERSION = "1.1.14";
+        public const string APP_VERSION = "1.1.15";
         public const string GITHUB_REPO = "gda96/AntigravityTray";
         private readonly SynchronizationContext _syncContext;
         private UpdateInfo _pendingUpdateInfo = null;
@@ -1486,8 +1486,8 @@ namespace AntigravityTray
             _info = info;
 
             Text = "Обновление Antigravity Tray Companion";
-            Size = new Size(580, 480);
-            MinimumSize = new Size(520, 420);
+            ClientSize = new Size(640, 520);
+            MinimumSize = new Size(560, 460);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -1504,16 +1504,16 @@ namespace AntigravityTray
                 Dock = DockStyle.Top,
                 Height = 85,
                 BackColor = Color.FromArgb(24, 28, 36),
-                Padding = new Padding(20, 14, 20, 10)
+                Padding = new Padding(24, 14, 24, 10)
             };
 
             Label lblTitle = new Label
             {
-                Text = "🚀 Доступно обновление " + _info.TagName,
-                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
+                Text = "🚀  Доступно обновление " + _info.TagName,
+                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(255, 255, 255),
                 AutoSize = true,
-                Location = new Point(18, 14)
+                Location = new Point(22, 14)
             };
             pnlHeader.Controls.Add(lblTitle);
 
@@ -1524,7 +1524,7 @@ namespace AntigravityTray
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(170, 185, 205),
                 AutoSize = true,
-                Location = new Point(20, 46)
+                Location = new Point(24, 48)
             };
             pnlHeader.Controls.Add(lblSub);
             Controls.Add(pnlHeader);
@@ -1533,36 +1533,36 @@ namespace AntigravityTray
             Label lblChangelogTitle = new Label
             {
                 Text = "Что нового в этой версии:",
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(40, 40, 40),
-                Location = new Point(20, 98),
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(35, 39, 47),
+                Location = new Point(24, 100),
                 AutoSize = true
             };
             Controls.Add(lblChangelogTitle);
 
             _txtChangelog = new RichTextBox
             {
-                Location = new Point(20, 124),
-                Size = new Size(524, 210),
+                Location = new Point(24, 128),
+                Size = new Size(592, 275),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 ReadOnly = true,
                 BackColor = Color.White,
                 ForeColor = Color.FromArgb(30, 30, 30),
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
-                Text = string.IsNullOrEmpty(_info.Changelog) ? "Описание обновления не указано." : _info.Changelog.Replace("\r\n", "\n").Replace("\n", "\r\n"),
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ScrollBars = RichTextBoxScrollBars.Vertical
             };
+            SetFormattedChangelog(_txtChangelog, _info.Changelog);
             Controls.Add(_txtChangelog);
 
             // Bottom Progress section
             _lblProgress = new Label
             {
-                Location = new Point(20, 344),
-                Size = new Size(524, 20),
+                Location = new Point(24, 412),
+                Size = new Size(592, 18),
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Font = new Font("Segoe UI", 8.5F, FontStyle.Regular),
-                ForeColor = Color.FromArgb(70, 70, 70),
+                ForeColor = Color.FromArgb(60, 60, 60),
                 Text = "",
                 Visible = false
             };
@@ -1570,8 +1570,8 @@ namespace AntigravityTray
 
             _progressBar = new ProgressBar
             {
-                Location = new Point(20, 366),
-                Size = new Size(524, 18),
+                Location = new Point(24, 432),
+                Size = new Size(592, 14),
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Minimum = 0,
                 Maximum = 100,
@@ -1580,27 +1580,40 @@ namespace AntigravityTray
             };
             Controls.Add(_progressBar);
 
-            // Action Buttons Panel
+            // Action Buttons Panel (Docked at Bottom)
+            Panel pnlBottom = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 64,
+                BackColor = Color.FromArgb(242, 244, 247),
+                Padding = new Padding(24, 12, 24, 12)
+            };
+            pnlBottom.Paint += (s, pe) =>
+            {
+                using (Pen borderPen = new Pen(Color.FromArgb(220, 224, 230)))
+                {
+                    pe.Graphics.DrawLine(borderPen, 0, 0, pnlBottom.Width, 0);
+                }
+            };
+
             _btnUpdate = new Button
             {
-                Text = "⚡ Обновить сейчас",
+                Text = "⚡  Обновить сейчас",
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
-                Location = new Point(20, 394),
-                Size = new Size(160, 34),
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+                Location = new Point(24, 13),
+                Size = new Size(185, 38),
                 FlatStyle = FlatStyle.System,
                 Cursor = Cursors.Hand
             };
             _btnUpdate.Click += OnStartUpdateClick;
-            Controls.Add(_btnUpdate);
+            pnlBottom.Controls.Add(_btnUpdate);
 
             _btnGitHub = new Button
             {
-                Text = "🌐 Открыть GitHub",
+                Text = "🌐  Открыть на GitHub",
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular),
-                Location = new Point(190, 394),
-                Size = new Size(130, 34),
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+                Location = new Point(219, 13),
+                Size = new Size(175, 38),
                 FlatStyle = FlatStyle.System,
                 Cursor = Cursors.Hand
             };
@@ -1613,22 +1626,58 @@ namespace AntigravityTray
                 }
                 catch { }
             };
-            Controls.Add(_btnGitHub);
+            pnlBottom.Controls.Add(_btnGitHub);
 
             _btnClose = new Button
             {
                 Text = "Позже",
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular),
-                Location = new Point(434, 394),
-                Size = new Size(110, 34),
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Location = new Point(506, 13),
+                Size = new Size(110, 38),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 FlatStyle = FlatStyle.System,
                 DialogResult = DialogResult.Cancel
             };
             _btnClose.Click += (s, e) => Close();
-            Controls.Add(_btnClose);
+            pnlBottom.Controls.Add(_btnClose);
 
+            Controls.Add(pnlBottom);
             CancelButton = _btnClose;
+        }
+
+        private static void SetFormattedChangelog(RichTextBox rtb, string raw)
+        {
+            if (string.IsNullOrEmpty(raw))
+            {
+                rtb.Text = "Описание обновления не указано.";
+                return;
+            }
+
+            string[] lines = raw.Replace("\r\n", "\n").Split('\n');
+            rtb.Clear();
+            foreach (string line in lines)
+            {
+                string trimmed = line.Trim();
+                if (trimmed.StartsWith("## "))
+                {
+                    rtb.SelectionFont = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+                    rtb.SelectionColor = Color.FromArgb(0, 102, 204);
+                    rtb.AppendText(trimmed.Substring(3) + "\r\n");
+                }
+                else if (trimmed.StartsWith("### "))
+                {
+                    rtb.SelectionFont = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+                    rtb.SelectionColor = Color.FromArgb(40, 40, 40);
+                    rtb.AppendText(trimmed.Substring(4) + "\r\n");
+                }
+                else
+                {
+                    string cleanLine = line.Replace("**", "").Replace("`", "");
+                    rtb.SelectionFont = new Font("Segoe UI", 9.5F, FontStyle.Regular);
+                    rtb.SelectionColor = Color.FromArgb(50, 50, 50);
+                    rtb.AppendText(cleanLine + "\r\n");
+                }
+            }
         }
 
         private void OnStartUpdateClick(object sender, EventArgs e)
