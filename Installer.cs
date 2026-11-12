@@ -387,7 +387,7 @@ namespace AntigravityTraySetup
             {
                 Text = "Запускать автоматически при входе в Windows",
                 Location = new Point(25, curY),
-                Checked = true,
+                Checked = false,
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9F)
             };

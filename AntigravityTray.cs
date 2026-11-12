@@ -25,6 +25,14 @@ namespace AntigravityTray
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
 
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        private const uint WM_HOTKEY = 0x0312;
+
         [STAThread]
         static void Main(string[] args)
         {
@@ -48,12 +56,13 @@ namespace AntigravityTray
 
             if (!isNewInstance)
             {
-                MessageBox.Show(
-                    "Antigravity Tray уже запущен в области уведомлений (у часов).\n\nНажмите Ctrl + Shift + A или кликните по иконке у часов, чтобы развернуть программу.",
-                    "Antigravity Tray",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
+                // Another instance is already running. Signal existing window and exit gracefully.
+                // This prevents modal MessageBox dialogs from hanging process orchestrators like ProcessPilot.
+                IntPtr hMsgWnd = FindWindow(null, "AntigravityTray_MsgWnd");
+                if (hMsgWnd != IntPtr.Zero)
+                {
+                    PostMessage(hMsgWnd, WM_HOTKEY, (IntPtr)9001, IntPtr.Zero);
+                }
                 return;
             }
 
@@ -221,7 +230,7 @@ namespace AntigravityTray
         private IntPtr _keyboardHookHandle = IntPtr.Zero;
 
         // Constants
-        public const string APP_VERSION = "1.1.13";
+        public const string APP_VERSION = "1.1.14";
         public const string GITHUB_REPO = "gda96/AntigravityTray";
         private readonly SynchronizationContext _syncContext;
         private UpdateInfo _pendingUpdateInfo = null;
@@ -1266,12 +1275,39 @@ namespace AntigravityTray
         {
             try
             {
+                // 1. Check Task Scheduler task
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "schtasks.exe",
+                        Arguments = "/query /tn \"AntigravityTray\"",
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (Process p = Process.Start(psi))
+                    {
+                        p.WaitForExit(1500);
+                        if (p.ExitCode == 0) return true;
+                    }
+                }
+                catch { }
+
+                // 2. Check HKCU Run
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
                 {
-                    if (key != null)
+                    if (key != null && key.GetValue("AntigravityTray") != null)
                     {
-                        object val = key.GetValue("AntigravityTray");
-                        return val != null;
+                        return true;
+                    }
+                }
+
+                // 3. Check HKLM Run
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
+                {
+                    if (key != null && key.GetValue("AntigravityTray") != null)
+                    {
+                        return true;
                     }
                 }
             }
@@ -1326,6 +1362,11 @@ namespace AntigravityTray
                     catch { }
 
                     using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                    {
+                        if (key != null) key.DeleteValue("AntigravityTray", false);
+                    }
+
+                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                     {
                         if (key != null) key.DeleteValue("AntigravityTray", false);
                     }
